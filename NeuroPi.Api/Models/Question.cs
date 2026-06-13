@@ -1,9 +1,11 @@
+using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
 namespace NeuroPi.Api.Models
 {
     public class Question
     {
+        [Key]
         [JsonPropertyName("QID")]
         public string QID { get; set; } = string.Empty;
 

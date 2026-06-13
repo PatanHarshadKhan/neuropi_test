@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("NeuroPi.Api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4e1e83471f44d4d6d4691673269185bad9e8474b")]
 [assembly: System.Reflection.AssemblyProductAttribute("NeuroPi.Api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("NeuroPi.Api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

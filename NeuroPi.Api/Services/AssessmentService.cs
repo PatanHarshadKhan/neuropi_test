@@ -30,7 +30,6 @@ namespace NeuroPi.Api.Services
         private readonly AssessmentDbContext _context;
         private readonly IHostEnvironment _env;
 
-        private static List<Question> _questions = new();
         private static AssessmentRules _rules = new();
         private static readonly object _lock = new();
 
@@ -79,51 +78,73 @@ namespace NeuroPi.Api.Services
 
         public async Task InitializeAsync()
         {
-            if (_questions.Any()) return;
+            // Resolve file paths
+            string rootPath = _env.ContentRootPath;
+            string qPath = Path.Combine(rootPath, "questions.json");
+            string rPath = Path.Combine(rootPath, "rules.json");
 
-            lock (_lock)
+            if (!File.Exists(qPath))
             {
-                if (_questions.Any()) return;
+                qPath = Path.Combine(Directory.GetParent(rootPath)?.FullName ?? "", "questions.json");
+            }
+            if (!File.Exists(rPath))
+            {
+                rPath = Path.Combine(Directory.GetParent(rootPath)?.FullName ?? "", "rules.json");
+            }
 
-                // Resolve file paths
-                // Look in current folder, then parent folder
-                string rootPath = _env.ContentRootPath;
-                string qPath = Path.Combine(rootPath, "questions.json");
-                string rPath = Path.Combine(rootPath, "rules.json");
+            // Check if the Questions table exists/is queryable. If not, recreate database
+            try
+            {
+                _ = await _context.Questions.AnyAsync();
+            }
+            catch (Exception)
+            {
+                await _context.Database.EnsureDeletedAsync();
+                await _context.Database.EnsureCreatedAsync();
+            }
 
-                if (!File.Exists(qPath))
-                {
-                    qPath = Path.Combine(Directory.GetParent(rootPath)?.FullName ?? "", "questions.json");
-                }
-                if (!File.Exists(rPath))
-                {
-                    rPath = Path.Combine(Directory.GetParent(rootPath)?.FullName ?? "", "rules.json");
-                }
-
+            // Seed questions in SQLite database if empty
+            if (!await _context.Questions.AnyAsync())
+            {
                 if (File.Exists(qPath))
                 {
                     var json = File.ReadAllText(qPath);
-                    _questions = JsonSerializer.Deserialize<List<Question>>(json) ?? new();
+                    var questions = JsonSerializer.Deserialize<List<Question>>(json) ?? new();
+                    await _context.Questions.AddRangeAsync(questions);
+                    await _context.SaveChangesAsync();
                 }
                 else
                 {
                     throw new FileNotFoundException("questions.json could not be found.");
                 }
+            }
 
-                if (File.Exists(rPath))
+            // Load rules in memory
+            if (_rules.StudentResponseTemplate == null || !_rules.StudentResponseTemplate.Any())
+            {
+                lock (_lock)
                 {
-                    var json = File.ReadAllText(rPath);
-                    _rules = JsonSerializer.Deserialize<AssessmentRules>(json) ?? new();
-                }
-                else
-                {
-                    throw new FileNotFoundException("rules.json could not be found.");
+                    if (_rules.StudentResponseTemplate == null || !_rules.StudentResponseTemplate.Any())
+                    {
+                        if (File.Exists(rPath))
+                        {
+                            var json = File.ReadAllText(rPath);
+                            _rules = JsonSerializer.Deserialize<AssessmentRules>(json) ?? new();
+                        }
+                        else
+                        {
+                            throw new FileNotFoundException("rules.json could not be found.");
+                        }
+                    }
                 }
             }
-            await Task.CompletedTask;
         }
 
-        public List<Question> GetQuestions() => _questions;
+        public List<Question> GetQuestions()
+        {
+            InitializeAsync().GetAwaiter().GetResult();
+            return _context.Questions.ToList();
+        }
         public AssessmentRules GetRules() => _rules;
 
         public async Task<AssessmentSession> StartSessionAsync(string studentName, string grade, string mode, string apiKey)
@@ -167,7 +188,7 @@ namespace NeuroPi.Api.Services
                 }
 
                 var templateQ = template[session.CompactIndex];
-                var question = _questions.FirstOrDefault(q => q.QID == templateQ.AssessmentQID);
+                var question = await _context.Questions.FirstOrDefaultAsync(q => q.QID == templateQ.AssessmentQID);
                 return question;
             }
             else // Adaptive Mode
@@ -177,15 +198,15 @@ namespace NeuroPi.Api.Services
                 // 1. Interspersed Attention Validity checks
                 if (session.ValidityStep == 0 && totalAnswered >= 18)
                 {
-                    return GetValidityCheckQuestion(session, 0);
+                    return await GetValidityCheckQuestionAsync(session, 0);
                 }
                 else if (session.ValidityStep == 1 && totalAnswered >= 36)
                 {
-                    return GetValidityCheckQuestion(session, 1);
+                    return await GetValidityCheckQuestionAsync(session, 1);
                 }
                 else if (session.ValidityStep == 2 && totalAnswered >= 54)
                 {
-                    return GetValidityCheckQuestion(session, 2);
+                    return await GetValidityCheckQuestionAsync(session, 2);
                 }
 
                 // 2. Main adaptive metrics loop
@@ -198,9 +219,9 @@ namespace NeuroPi.Api.Services
                 }
 
                 var currentMetric = METRIC_DEFINITIONS[session.CurrentMetricIndex];
-                var subdomainQuestions = _questions.Where(q => 
+                var subdomainQuestions = await _context.Questions.Where(q => 
                     q.Domain == currentMetric.Domain && 
-                    q.Subdomain == currentMetric.Subdomain).ToList();
+                    q.Subdomain == currentMetric.Subdomain).ToListAsync();
 
                 Question? selectedQ = null;
                 var askedQids = session.Responses.Select(r => r.QID).ToHashSet();
@@ -249,10 +270,10 @@ namespace NeuroPi.Api.Services
             }
         }
 
-        private Question? GetValidityCheckQuestion(AssessmentSession session, int stepIndex)
+        private async Task<Question?> GetValidityCheckQuestionAsync(AssessmentSession session, int stepIndex)
         {
             var askedQids = session.Responses.Select(r => r.QID).ToHashSet();
-            var validityPool = _questions.Where(q => q.Domain == "Validity & Readiness").ToList();
+            var validityPool = await _context.Questions.Where(q => q.Domain == "Validity & Readiness").ToListAsync();
             var valQ = validityPool.FirstOrDefault(q => !askedQids.Contains(q.QID));
             return valQ;
         }
@@ -268,7 +289,7 @@ namespace NeuroPi.Api.Services
             if (session == null || session.IsCompleted) return null;
 
             // Look up question details
-            var question = _questions.FirstOrDefault(q => q.QID == qid);
+            var question = await _context.Questions.FirstOrDefaultAsync(q => q.QID == qid);
             if (question == null) return null;
 
             var isReverse = question.ReverseScored.Equals("Yes", StringComparison.OrdinalIgnoreCase);
@@ -832,7 +853,7 @@ namespace NeuroPi.Api.Services
 
             foreach (var metric in METRIC_DEFINITIONS)
             {
-                var pool = _questions.Where(q => q.Domain == metric.Domain && q.Subdomain == metric.Subdomain).ToList();
+                var pool = await _context.Questions.Where(q => q.Domain == metric.Domain && q.Subdomain == metric.Subdomain).ToListAsync();
                 int count = Math.Min(3, pool.Count);
                 for (int i = 0; i < count; i++)
                 {
@@ -873,7 +894,7 @@ namespace NeuroPi.Api.Services
             }
 
             // Also mock 3 validity responses
-            var validityPool = _questions.Where(q => q.Domain == "Validity & Readiness").Take(3).ToList();
+            var validityPool = await _context.Questions.Where(q => q.Domain == "Validity & Readiness").Take(3).ToListAsync();
             foreach (var q in validityPool)
             {
                 var isReverse = q.ReverseScored.Equals("Yes", StringComparison.OrdinalIgnoreCase);

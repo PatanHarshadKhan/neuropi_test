@@ -309,7 +309,7 @@ export default function TestingScreen({ session, firstQuestion, totalQuestions, 
             </div>
           </div>
 
-          <div className="console-log-box" style={{ flex: 1, minHeight: '250px', background: '#0a0d16', borderRadius: '8px', padding: '15px', fontFamily: 'monospace', fontSize: '0.85rem', overflowY: 'auto' }}>
+          <div className="console-log-box" style={{ height: '320px', background: '#0a0d16', borderRadius: '8px', padding: '15px', fontFamily: 'monospace', fontSize: '0.85rem', overflowY: 'auto' }}>
             {logs.map((log, idx) => (
               <div key={idx} className={`console-line log-${log.type}`} style={{ marginBottom: '8px', lineHeight: '1.4' }}>
                 <span className="log-time" style={{ color: '#5b6375', marginRight: '8px' }}>[{log.timestamp}]</span>
